@@ -3,9 +3,10 @@ use http;
 use ntex;
 use serde;
 use serde_json;
+use tokio;
 
-use crate::handlers::healthcheck;
-use crate::handlers::phone_number;
+use crate::core::data;
+use crate::handlers;
 
 #[derive(Clone, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -154,47 +155,147 @@ impl Errors {
     }
 }
 
+async fn select_method(
+    request: &Request,
+    mut response: Response,
+) -> Response {
+    match request.method.as_str() {
+        "healthcheck" => {
+            response = handlers::healthcheck::healthcheck_handler(&request, response).await
+        },
+        "" => {
+            response =
+                handlers::error::error_handler(&request, response, Errors::MethodNotFound, None)
+                    .await
+        },
+        _ => {
+            response =
+                handlers::error::error_handler(&request, response, Errors::MethodNotFound, None)
+                    .await
+        },
+    }
+
+    if (response.result.is_none() && response.error.is_none())
+        || (response.result.is_some() && response.error.is_some())
+    {
+        response.error = Some(Errors::InvalidRequest.to_error(None));
+    }
+
+    response
+}
+
 pub async fn handler(requests: ntex::web::types::Json<Vec<Request>>) -> ntex::web::HttpResponse {
+    let rpc_service_workers: usize = data::RPC_SERVICE
+        .clone()
+        .workers
+        .parse::<usize>()
+        .unwrap();
+    let requests_per_worker: Vec<Vec<Request>> = requests
+        .chunks(rpc_service_workers)
+        .map(|r| r.into())
+        .collect();
+
     let mut responses: Vec<Response> = Vec::new();
+    let mut rpc_tasks = Vec::new();
 
-    // TODO: add tokio::spawn tasks for much perfomance
-    for request in requests.iter() {
-        let mut response: Response = Response::new(request.id.clone(), None, None);
+    // TODO: add tokio::spawn tasks for better perfomance
+    // old variant without tasks
+    // for request in requests.iter() {
+    //     let mut response: Response = Response::new(request.id.clone(), None, None);
 
-        if !request.version_is_valid() || !request.id_is_valid() {
-            response.error = Some(Errors::InvalidRequest.to_error(None));
+    //     if !request.version_is_valid() || !request.id_is_valid() {
+    //         if !request.id_is_valid() {
+    //             response.id = serde_json::Value::Null;
+    //         }
 
-            if !request.id_is_valid() {
-                response.id = serde_json::Value::Null;
+    //         response.error = Some(Errors::InvalidRequest.to_error(None));
+    //     }
+
+    //     response = select_method(request, response).await;
+    //     responses.push(response);
+    // }
+
+    // good but its slow when too much requests
+    // for request in requests.clone().into_iter() {
+    //     let task = tokio::spawn(
+    //         async move {
+    //             let mut response: Response = Response::new(request.id.clone(), None, None);
+
+    //             if !request.version_is_valid() || !request.id_is_valid() {
+    //                 if !request.id_is_valid() {
+    //                     response.id = serde_json::Value::Null;
+    //                 }
+
+    //                 response.error = Some(Errors::InvalidRequest.to_error(None));
+    //             }
+
+    //             response = select_method(&request, response).await;
+
+    //             response
+    //         }
+    //     );
+
+    //     rpc_tasks.push(task);
+    // }
+
+    // for rpc_task in rpc_tasks {
+    //     let response = rpc_task.await;
+    //     responses.push(response.unwrap());
+    // }
+
+    // best choice
+    for worker_requests in requests_per_worker {
+        let task = tokio::spawn(async move {
+            let mut worker_responses: Vec<Response> = Vec::new();
+
+            for request in worker_requests {
+                let mut response: Response = Response::new(request.id.clone(), None, None);
+
+                if !request.version_is_valid() || !request.id_is_valid() {
+                    if !request.id_is_valid() {
+                        response.id = serde_json::Value::Null;
+                    }
+
+                    response.error = Some(Errors::InvalidRequest.to_error(None));
+                }
+
+                if response.error.is_none() {
+                    response = select_method(&request, response).await;
+                }
+
+                worker_responses.push(response);
             }
 
-            responses.push(response);
-            continue;
-        }
+            worker_responses
+        });
 
-        match request.method.as_str() {
-            "healthcheck" => {
-                response = healthcheck::healthcheck_handler(request, response).await
-            },
-            "validate_phone_number" => {
-                response = phone_number::validate_handler(request, response).await
-            },
-            _ => response.error = Some(Errors::MethodNotFound.to_error(None))
-        }
-        // for (method, handler) in HANDLERS {
-        //     // ...
-        // }
-
-        if response.result.is_none() && response.result.is_none() {
-            response.error = Some(Errors::MethodNotFound.to_error(None));
-        }
-
-        responses.push(response);
+        rpc_tasks.push(task);
     }
 
+    for rpc_task in rpc_tasks {
+        // idk why its not work
+        // let _ = rpc_task
+        //     .await
+        //     .unwrap()
+        //     .iter()
+        //     .map(|r| responses.push(r.to_owned()));
+
+        for response in rpc_task.await.unwrap() {
+            responses.push(response)
+        }
+    }
+
+    // dumbass shit
     if responses.len() == 1 {
-        return responses[0].to_http_response()
+        let response: &Response = &responses[0];
+
+        return ntex::web::HttpResponse::build(response.status_code())
+            .set_header("content-type", "application/json")
+            .json(&vec![response]);
     }
 
-    ntex::web::HttpResponse::Ok().json(&responses)
+    // responses.to_http_response()
+    ntex::web::HttpResponse::Ok()
+        .set_header("content-type", "application/json")
+        .json(&responses)
 }

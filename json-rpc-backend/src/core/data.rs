@@ -1,4 +1,9 @@
 use crate::utils::envs;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref RPC_SERVICE: RpcService = RpcService::new();
+}
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
 pub struct RpcService {
