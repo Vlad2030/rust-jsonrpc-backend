@@ -29,6 +29,11 @@ FROM rust
 # Set the workdir
 WORKDIR /home/json-rpc-backend
 
+ENV RPC_SERVICE_IP localhost
+ENV RPC_SERVICE_PORT 8000
+ENV RPC_SERVICE_LOGGING info,warn,error,debug
+ENV RPC_SERVICE_WORKERS 1
+
 # Start server
 COPY --from=build /build/target/release/json-rpc-backend .
 EXPOSE 8080
