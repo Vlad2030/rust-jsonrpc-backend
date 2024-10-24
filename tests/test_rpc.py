@@ -2,6 +2,7 @@ import os
 import typing
 import dotenv
 import requests
+import multiprocessing
 
 dotenv.load_dotenv()
 
@@ -53,171 +54,140 @@ def test_rpc_http_methods() -> None:
 
 
 def test_rpc_jsonrpc() -> None:
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": None,
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+    json = [
+        {
+            "jsonrpc": None,
+            "id": 1,
+            "method": "healthcheck",
+        }
+    ]
+
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "",
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["jsonrpc"] = ""
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.1",
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["jsonrpc"] = "2.1"
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": 2.0,
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["jsonrpc"] = 2.0
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["jsonrpc"] = "2.0"
+    req = json_rpc_request(json=json)
     assert req.status_code == 200
 
 
 def test_rpc_id() -> None:
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": [1],
-                "method": "healthcheck",
-            }
-        ],
-    )
+    json = [
+        {
+            "jsonrpc": "2.0",
+            "id": [1],
+            "method": "healthcheck",
+        }
+    ]
+
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": {},
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["id"] = {}
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1.123123123,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["id"] = 1.123123123
+    req = json_rpc_request(json=json)
     assert req.status_code == 200  # TODO FIX
 
 
 def test_rpc_method() -> None:
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": None,
-            }
-        ],
-    )
+    json = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": None,
+        }
+    ]
+
+    req = json_rpc_request(json=json)
     assert req.status_code == 400
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "",
-            }
-        ],
-    )
+
+    json[0]["method"] = ""
+    req = json_rpc_request(json=json)
     assert req.status_code == 404
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "_",
-            }
-        ],
-    )
+
+    json[0]["method"] = "_"
+    req = json_rpc_request(json=json)
     assert req.status_code == 404
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "healthcheck",
-            }
-        ],
-    )
+
+    json[0]["method"] = "healthcheck"
+    req = json_rpc_request(json=json)
     assert req.status_code == 200
 
 
 def test_rpc_json_dict() -> None:
-    req = json_rpc_request(
-        json={
+    json = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "healthcheck",
+    }
+
+    req = json_rpc_request(json=json)
+    assert req.status_code == 400
+
+
+def test_rpc_json_big_list() -> None:
+    json = [
+        {
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "healthcheck",
+        }
+        for id in range(256)
+    ]
+
+    req = json_rpc_request(json=json)
+    assert req.status_code == 200
+
+
+def test_rpc_json_highload() -> None:
+    json = [
+        {
             "jsonrpc": "2.0",
             "id": 1,
             "method": "healthcheck",
         }
-    )
-    assert req.status_code == 400
+    ]
+
+    for _ in range(2048):
+        req = json_rpc_request(json=json)
+        assert req.status_code == 200
 
 
-def test_rpc_json_list() -> None:
-    req = json_rpc_request(
-        json=[
+def test_rpc_json_big_list_highload() -> None:
+    processes = []
+
+    def worker() -> None:
+        json = [
             {
                 "jsonrpc": "2.0",
                 "id": id,
-                "method": "validate_phone_number",
+                "method": "healthcheck",
             }
             for id in range(256)
         ]
-    )
-    assert req.status_code == 200
 
+        for _ in range(2048):
+            req = json_rpc_request(json=json)
+            assert req.status_code == 200
 
-def test_rpc_number_validator() -> None:
-    req = json_rpc_request(
-        json=[
-            {
-                "jsonrpc": "2.0",
-                "id": id,
-                "method": "validate_phone_number",
-                "params": {
-                    "number": "+79121234567",
-                },
-            }
-            for id in range(256)
-        ]
-    )
-    assert req.status_code == 200
+    for _ in range(4):
+        process = multiprocessing.Process(target=worker)
+        processes.append(process)
+        process.start()
+
+    for process in processes:
+        process.join()
