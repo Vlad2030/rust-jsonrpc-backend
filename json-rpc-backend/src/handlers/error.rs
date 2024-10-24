@@ -13,8 +13,16 @@ pub async fn invalid_request() -> Result<ntex::web::HttpResponse, ntex::web::Err
 }
 
 pub async fn method_not_allowed() -> Result<ntex::web::HttpResponse, ntex::web::Error> {
+    Ok(ntex::web::HttpResponse::MethodNotAllowed().finish())
+}
 
-    Ok(ntex::web::HttpResponse::MethodNotAllowed()
-        .finish()
-    )
+pub async fn error_handler(
+    request: &rpc::Request,
+    mut response: rpc::Response,
+    error: rpc::Errors,
+    data: Option<serde_json::Value>,
+) -> rpc::Response {
+    response.error = Some(error.to_error(data));
+
+    response
 }
