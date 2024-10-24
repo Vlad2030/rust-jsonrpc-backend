@@ -2,4 +2,4 @@
 
 Simple JSON-RPC rust backend example
 
-> 262k RPS with 4 workers (i5-8350U)
+> 700k RPS with 4 workers (50 rpc calls per request, i5-8350U)
