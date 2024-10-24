@@ -7,7 +7,7 @@ use json_rpc_backend::utils::envs;
 
 #[ntex::main]
 async fn main() -> std::io::Result<()> {
-    let rpc_service: data::RpcService = data::RpcService::new();
+    let rpc_service: data::RpcService = data::RPC_SERVICE.clone();
 
     let ip: &str = &rpc_service.ip;
     let port: u16 = rpc_service.port.parse::<u16>().unwrap();
